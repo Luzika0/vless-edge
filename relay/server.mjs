@@ -100,6 +100,7 @@ async function handleClient(socket) {
 		try { udp?.close(); } catch {}
 		socket.destroy();
 	};
+	socket.setTimeout(10_000, close);
 	const touch = () => {
 		clearTimeout(idleTimer);
 		idleTimer = setTimeout(close, IDLE_TIMEOUT_MS);
@@ -118,6 +119,7 @@ async function handleClient(socket) {
 		const suppliedSecret = await reader.exact(secretLength);
 		if (!safeEqual(suppliedSecret, Buffer.from(SECRET, "utf8"))) throw new Error("Authentication failed");
 
+		socket.setTimeout(0);
 		const type = (await reader.exact(1))[0];
 		const portBytes = await reader.exact(2);
 		const port = portBytes.readUInt16BE(0);
