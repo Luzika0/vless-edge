@@ -125,6 +125,7 @@ export default {
 					return;
 				}
 				initialized = true;
+				udpMode = parsed.command === 0x02;
 				try {
 					if (parsed.command === 0x01) {
 						tcpSocket = connect({ hostname: parsed.host, port: parsed.port }, { allowHalfOpen: true });
@@ -165,9 +166,6 @@ export default {
 			}
 
 			if (bytes.byteLength === 0) return;
-			if (pendingHeader.byteLength === 0 && tcpSocket && !udpBuffer.length && !env.__unused) {
-				// TCP and UDP both use the same WebSocket stream after initialization.
-			}
 			tcpWriteChain = tcpWriteChain.then(async () => {
 				if (closed || !tcpWriter) return;
 				// TCP mode writes raw stream bytes. UDP mode writes complete length-prefixed datagrams.
@@ -184,9 +182,6 @@ export default {
 		let udpMode = false;
 		server.addEventListener("message", (event) => {
 			messageChain = messageChain.then(async () => {
-				if (!initialized && pendingHeader.byteLength === 0) {
-					// The mode is selected from the parsed VLESS command during initialization.
-				}
 				await handleMessage(event);
 			}).catch(async (error) => {
 				console.error("WebSocket message failed", error?.message || error);
