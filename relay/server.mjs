@@ -90,6 +90,7 @@ async function handleClient(socket) {
 	let closed = false;
 	let byteWindowStart = Date.now();
 	let bytesThisWindow = 0;
+	let backpressured = false;
 	const close = () => {
 		if (closed) return;
 		closed = true;
@@ -124,11 +125,21 @@ async function handleClient(socket) {
 		udp = dgram.createSocket(family === 6 ? "udp6" : "udp4");
 
 		udp.on("message", (message) => {
-			if (closed || !socket.writable) return;
+			if (closed || !socket.writable || backpressured) return;
+			const now = Date.now();
+			if (now - byteWindowStart >= 1000) {
+				byteWindowStart = now;
+				bytesThisWindow = 0;
+			}
+			bytesThisWindow += message.length;
+			if (bytesThisWindow > MAX_SESSION_BYTES_PER_SECOND) {
+				close();
+				return;
+			}
 			const frame = Buffer.allocUnsafe(message.length + 2);
 			frame.writeUInt16BE(message.length, 0);
 			message.copy(frame, 2);
-			if (!socket.write(frame)) udp.pause?.();
+			backpressured = !socket.write(frame);
 			touch();
 		});
 		udp.on("error", (error) => {
@@ -157,7 +168,7 @@ async function handleClient(socket) {
 		if (!closed) console.warn("UDP relay session closed:", error.message);
 		close();
 	}
-	socket.on("drain", () => udp?.resume?.());
+	socket.on("drain", () => { backpressured = false; });
 	socket.on("error", () => close());
 	socket.on("close", () => close());
 }
