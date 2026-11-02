@@ -5,6 +5,7 @@ A VLESS-over-WebSocket-to-outbound-TCP bridge running on Cloudflare Workers. It 
 ## Supported features
 
 - VLESS TCP over WebSocket (WSS).
+- VLESS UDP over WebSocket using an authenticated TLS/TCP relay on a VPS.
 - Cloudflare Workers custom domains.
 - UUID authentication and a private WebSocket path.
 - IPv4, IPv6, and domain-name destinations.
@@ -14,14 +15,14 @@ A VLESS-over-WebSocket-to-outbound-TCP bridge running on Cloudflare Workers. It 
 
 This project is **not Xray-core** and does not implement the full V2Ray/Xray feature set.
 
-- VLESS UDP command (`0x02)), UDP forwarding, DNS-over-UDP, and QUIC are not supported.
+- Native UDP sockets are not available in the Worker. UDP is encapsulated over a TLS-protected TCP connection to the VPS relay; this is not native UDP transport and can introduce head-of-line blocking and latency.
 - XTLS/REALITY, MUX, and Xray routing features are not implemented.
 - Cloudflare's documented Workers TCP Sockets API exposes outbound TCP sockets via `connect()`; it is not an outbound UDP datagram API. A Worker receiving a WebSocket connection cannot turn that into arbitrary UDP forwarding merely by changing the VLESS parser.
 - Workers do not accept arbitrary inbound raw TCP/UDP from the public Internet. This Worker receives HTTPS/WebSocket requests.
 - Cloudflare restricts certain outbound TCP destinations and ports. A successful deployment does not guarantee every target can be reached.
 - WebSocket sessions may be interrupted during runtime updates or failures; clients should reconnect.
 
-If full VLESS UDP is a requirement, use a UDP-capable proxy backend (for example, Xray on a VPS) and treat the Worker as a WebSocket/TCP front end only where appropriate. Do not advertise this Worker as UDP-capable.
+For UDP, deploy the included authenticated relay in `relay/` on a VPS. The Worker forwards VLESS UDP datagrams to that relay over TLS/TCP; the VPS sends and receives actual UDP datagrams. This preserves the existing WebSocket client endpoint but TCP encapsulation can reduce real-time performance under packet loss. It does not guarantee every voice/video app will work perfectly.
 
 Review the current [Workers limits](https://developers.cloudflare.com/workers/platform/limits/), [TCP Sockets documentation](https://developers.cloudflare.com/workers/runtime-apis/tcp-sockets/), and [Custom Domains documentation](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/).
 
@@ -195,3 +196,59 @@ If either secret is exposed, generate a new UUID/path and run `wrangler secret p
 - `src/vless.js` — VLESS request parser and destination validation.
 - `test/vless.spec.js` — protocol parser and HTTP endpoint tests.
 - `wrangler.jsonc` — Wrangler deployment configuration.
+
+## Enable UDP through your VPS
+
+The Worker itself does not open UDP sockets. The optional relay receives a TLS/TCP stream from the Worker and forwards framed datagrams using a real UDP socket on your VPS.
+
+### 1. Prepare a DNS name and TLS certificate
+
+Create a DNS-only A record such as `relay.example.com` pointing to your VPS public IPv4 address. Do not proxy this relay hostname through Cloudflare. Issue a TLS certificate for that hostname (for example, with Certbot). The certificate hostname must match `UDP_RELAY_HOST` configured in the Worker.
+
+### 2. Deploy the relay on the VPS
+
+Copy the `relay/` directory to your VPS. Create `relay/.env` with:
+
+```dotenv
+UDP_RELAY_LISTEN_PORT=8443
+UDP_RELAY_SECRET=PASTE_THE_SAME_RANDOM_SECRET_USED_BY_THE_WORKER
+UDP_RELAY_TLS_CERT=/etc/letsencrypt/live/relay.example.com/fullchain.pem
+UDP_RELAY_TLS_KEY=/etc/letsencrypt/live/relay.example.com/privkey.pem
+```
+
+Generate a secret with `openssl rand -hex 32`. Keep it private and use the exact same value on the Worker.
+
+Build and run with Docker:
+
+```bash
+docker build -t vless-udp-relay ./relay
+docker run -d --name vless-udp-relay --restart unless-stopped --network host --env-file relay/.env -v /etc/letsencrypt:/etc/letsencrypt:ro vless-udp-relay
+docker logs -f vless-udp-relay
+```
+
+Allow inbound **TCP 8443** in your VPS/cloud firewall. The relay uses outbound UDP to destinations, so allow outbound UDP and stateful return traffic. Do not expose an inbound UDP listener for this relay.
+
+### 3. Configure Worker secrets
+
+From the project directory, set the relay hostname, port, and shared secret as encrypted secrets:
+
+```bash
+npx wrangler secret put UDP_RELAY_HOST
+npx wrangler secret put UDP_RELAY_PORT
+npx wrangler secret put UDP_RELAY_SECRET
+```
+
+Use `relay.example.com`, `8443`, and the same random secret used in `relay/.env`. Keep `VLESS_UUID` and `WS_PATH` unchanged. Then deploy:
+
+```bash
+npm test
+npm run deploy
+```
+
+### 4. Client settings and limitations
+
+Keep the existing VLESS + WebSocket + TLS profile pointed at the Worker hostname and path. Enable UDP support in the client/profile if it has a UDP toggle; do not change the server address to the VPS. TCP requests continue to use the existing direct Worker TCP path.
+
+The VPS relay rejects private/reserved destinations, limits datagram sizes and per-session throughput, and closes idle sessions. UDP is carried inside TCP between the Worker and VPS, so packet loss can delay later packets (head-of-line blocking). This is a compatibility bridge, not native end-to-end UDP; test voice/video calls on the actual mobile networks and apps before relying on it.
+
+Never commit `.env`, certificates, UUIDs, WebSocket paths, or relay secrets to Git.
