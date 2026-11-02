@@ -153,7 +153,7 @@ async function handleClient(socket) {
 			console.error("UDP socket error:", error.message);
 			close();
 		});
-		udp.connect(port, destinationIp);
+		await new Promise((resolve) => udp.connect(port, destinationIp, resolve));
 		touch();
 
 		while (!closed) {
