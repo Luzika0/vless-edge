@@ -84,7 +84,8 @@ export default {
 		let tcpSocket;
 		let tcpWriter;
 		let tcpReader;
-		let writeChain = Promise.resolve();
+		let messageChain = Promise.resolve();
+		let tcpWriteChain = Promise.resolve();
 
 		const closeBoth = async (code = 1000, reason = "Connection closed") => {
 			if (closed) return;
@@ -123,9 +124,8 @@ export default {
 				}
 
 				const parsed = parseVlessRequest(pendingHeader, env.VLESS_UUID);
+				if (parsed?.incomplete) return;
 				if (!parsed) {
-					// A VLESS header is at least 22 bytes; wait for a fragmented header.
-					if (pendingHeader.byteLength < 22) return;
 					await closeBoth(1008, "Invalid or unsupported VLESS request");
 					return;
 				}
@@ -161,11 +161,11 @@ export default {
 			}
 
 			if (bytes.byteLength === 0) return;
-			writeChain = writeChain.then(async () => {
+			tcpWriteChain = tcpWriteChain.then(async () => {
 				if (!closed && tcpWriter) await tcpWriter.write(bytes);
 			});
 			try {
-				await writeChain;
+				await tcpWriteChain;
 			} catch (error) {
 				console.error("TCP write failed", error?.message || error);
 				await closeBoth(1011, "TCP write failed");
@@ -173,7 +173,7 @@ export default {
 		};
 
 		server.addEventListener("message", (event) => {
-			writeChain = writeChain.then(() => handleMessage(event)).catch(async (error) => {
+			messageChain = messageChain.then(() => handleMessage(event)).catch(async (error) => {
 				console.error("WebSocket message failed", error?.message || error);
 				await closeBoth(1011, "Tunnel error");
 			});
