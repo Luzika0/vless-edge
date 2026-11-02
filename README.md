@@ -1,6 +1,6 @@
 # VLESS Edge — Cloudflare Workers
 
-A VLESS-over-WebSocket-to-outbound-TCP bridge running on Cloudflare Workers. It can use the default `workers.dev` hostname or a custom hostname in a Cloudflare zone.
+A VLESS-over-WebSocket bridge running on Cloudflare Workers: TCP connects directly from the Worker, while UDP datagrams are relayed through an optional authenticated VPS service. It can use the default `workers.dev` hostname or a custom hostname in a Cloudflare zone.
 
 ## Supported features
 
@@ -17,7 +17,7 @@ This project is **not Xray-core** and does not implement the full V2Ray/Xray fea
 
 - Native UDP sockets are not available in the Worker. UDP is encapsulated over a TLS-protected TCP connection to the VPS relay; this is not native UDP transport and can introduce head-of-line blocking and latency.
 - XTLS/REALITY, MUX, and Xray routing features are not implemented.
-- Cloudflare's documented Workers TCP Sockets API exposes outbound TCP sockets via `connect()`; it is not an outbound UDP datagram API. A Worker receiving a WebSocket connection cannot turn that into arbitrary UDP forwarding merely by changing the VLESS parser.
+- Cloudflare Workers still do not expose a native outbound UDP datagram socket API. UDP support in this project therefore depends on the separately deployed VPS relay.
 - Workers do not accept arbitrary inbound raw TCP/UDP from the public Internet. This Worker receives HTTPS/WebSocket requests.
 - Cloudflare restricts certain outbound TCP destinations and ports. A successful deployment does not guarantee every target can be reached.
 - WebSocket sessions may be interrupted during runtime updates or failures; clients should reconnect.
@@ -166,7 +166,7 @@ Create a VLESS profile with:
 | Allow insecure | Disabled |
 | Flow | None |
 
-This Worker supports TCP only. Select TCP for network traffic. UDP-dependent apps, DNS-over-UDP, QUIC, and UDP-based games will not work through this implementation.
+TCP traffic uses the Worker directly. VLESS UDP requests use the configured VPS relay. QUIC and other UDP-based apps may work through this encapsulation, but performance is not guaranteed because UDP is carried over TCP between the Worker and VPS.
 
 Use the hostname only, without `https://` or a trailing slash, in Address, Host, and SNI. The WebSocket path must include its leading slash.
 
@@ -192,8 +192,11 @@ If either secret is exposed, generate a new UUID/path and run `wrangler secret p
 
 ## Source layout
 
-- `src/index.js` — Worker HTTP/WebSocket entry point and TCP bridge.
-- `src/vless.js` — VLESS request parser and destination validation.
+- `src/index.js` — Worker HTTP/WebSocket entry point, TCP bridge, and optional UDP relay client.
+- `src/vless.js` — VLESS TCP/UDP request parser and destination validation.
+- `src/udp-relay.js` — authenticated relay handshake and stream framing.
+- `relay/server.mjs` — VPS TLS-to-UDP relay service.
+- `test/udp-relay.spec.js` — UDP relay framing tests.
 - `test/vless.spec.js` — protocol parser and HTTP endpoint tests.
 - `wrangler.jsonc` — Wrangler deployment configuration.
 
