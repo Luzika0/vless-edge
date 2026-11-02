@@ -1,5 +1,5 @@
 const UUID_HEX_PATTERN = /^[0-9a-f]{32}$/i;
-const DOMAIN_PATTERN = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\\.(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?))*$/i;
+const DOMAIN_PATTERN = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\.(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?))*$/i;
 
 export function uuidToBytes(value) {
 	if (typeof value !== "string") return null;
@@ -86,7 +86,7 @@ export function isValidPort(port) {
 
 export function isBlockedHost(host) {
 	if (typeof host !== "string" || host.length === 0) return true;
-	const value = host.toLowerCase().replace(/^\\[|\\]$/g, "").replace(/\\.$/, "");
+	const value = host.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
 
 	if (
 		value === "localhost" ||
@@ -137,7 +137,7 @@ export function isBlockedHost(host) {
 
 function parseIPv4(value) {
 	const parts = value.split(".");
-	if (parts.length !== 4 || !parts.every((part) => /^\\d{1,3}$/.test(part))) return null;
+	if (parts.length !== 4 || !parts.every((part) => /^\d{1,3}$/.test(part))) return null;
 	const octets = parts.map(Number);
 	return octets.every((part) => part >= 0 && part <= 255) ? octets : null;
 }
