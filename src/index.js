@@ -1,5 +1,5 @@
 import { connect } from "cloudflare:sockets";
-import { parseVlessRequest } from "./vless.js";
+import { parseVlessRequest, uuidToBytes } from "./vless.js";
 
 const MAX_PENDING_HEADER_BYTES = 8 * 1024;
 
@@ -57,6 +57,10 @@ export default {
 		if (!env.VLESS_UUID || !env.WS_PATH) {
 			console.error("Missing VLESS_UUID or WS_PATH Worker secret");
 			return json("Worker is not configured", 503);
+		}
+		if (!uuidToBytes(env.VLESS_UUID)) {
+			console.error("VLESS_UUID is not a valid UUID");
+			return json("Worker configuration is invalid", 503);
 		}
 
 		if (!isValidPath(env.WS_PATH)) {
