@@ -1,5 +1,5 @@
 const UUID_HEX_PATTERN = /^[0-9a-f]{32}$/i;
-const DOMAIN_PATTERN = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\.(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?))*$/i;
+const DOMAIN_PATTERN = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\\.(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?))*$/i;
 
 export function uuidToBytes(value) {
 	if (typeof value !== "string") return null;
@@ -23,9 +23,7 @@ export function parseVlessRequest(input, expectedUuid) {
 	if (data[0] !== 0) return null;
 
 	let mismatch = 0;
-	for (let i = 0; i < 16; i += 1) {
-		mismatch |= data[i + 1] ^ expected[i];
-	}
+	for (let i = 0; i < 16; i += 1) mismatch |= data[i + 1] ^ expected[i];
 	if (mismatch !== 0) return null;
 
 	const addonsLength = data[17];
@@ -33,34 +31,36 @@ export function parseVlessRequest(input, expectedUuid) {
 	const commandIndex = 18 + addonsLength;
 	if (commandIndex + 4 > data.byteLength) return { incomplete: true };
 
-	// VLESS command 0x01 is TCP. UDP and MUX are deliberately not implemented.
-	if (data[commandIndex] !== 0x01) return null;
+	const command = data[commandIndex];
+	// VLESS command 0x01 = TCP; 0x02 = UDP. MUX and other commands remain unsupported.
+	if (command !== 0x01 && command !== 0x02) return null;
 
 	const port = (data[commandIndex + 1] << 8) | data[commandIndex + 2];
 	const addressType = data[commandIndex + 3];
 	let offset = commandIndex + 4;
 	let host;
+	let addressBytes;
 
 	if (addressType === 0x01) {
 		if (offset + 4 > data.byteLength) return { incomplete: true };
-		const octets = Array.from(data.subarray(offset, offset + 4));
-		host = octets.join(".");
+		addressBytes = data.slice(offset, offset + 4);
+		host = Array.from(addressBytes).join(".");
 		offset += 4;
 	} else if (addressType === 0x02) {
 		if (offset >= data.byteLength) return { incomplete: true };
 		const length = data[offset++];
 		if (length < 1) return null;
 		if (offset + length > data.byteLength) return { incomplete: true };
-		host = new TextDecoder("utf-8", { fatal: true }).decode(data.subarray(offset, offset + length));
+		addressBytes = data.slice(offset, offset + length);
+		host = new TextDecoder("utf-8", { fatal: true }).decode(addressBytes);
 		offset += length;
 		if (!DOMAIN_PATTERN.test(host)) return null;
 		host = host.toLowerCase();
 	} else if (addressType === 0x03) {
 		if (offset + 16 > data.byteLength) return { incomplete: true };
+		addressBytes = data.slice(offset, offset + 16);
 		const words = [];
-		for (let i = 0; i < 16; i += 2) {
-			words.push(((data[offset + i] << 8) | data[offset + i + 1]).toString(16));
-		}
+		for (let i = 0; i < 16; i += 2) words.push(((addressBytes[i] << 8) | addressBytes[i + 1]).toString(16));
 		host = words.join(":");
 		offset += 16;
 	} else {
@@ -71,8 +71,11 @@ export function parseVlessRequest(input, expectedUuid) {
 
 	return {
 		version: data[0],
+		command,
 		host,
 		port,
+		addressType,
+		addressBytes,
 		payload: data.slice(offset),
 	};
 }
@@ -83,7 +86,7 @@ export function isValidPort(port) {
 
 export function isBlockedHost(host) {
 	if (typeof host !== "string" || host.length === 0) return true;
-	const value = host.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
+	const value = host.toLowerCase().replace(/^\\[|\\]$/g, "").replace(/\\.$/, "");
 
 	if (
 		value === "localhost" ||
@@ -129,13 +132,12 @@ export function isBlockedHost(host) {
 		return false;
 	}
 
-	// Only hostnames or literal IP addresses are accepted.
 	return !DOMAIN_PATTERN.test(value);
 }
 
 function parseIPv4(value) {
 	const parts = value.split(".");
-	if (parts.length !== 4 || !parts.every((part) => /^\d{1,3}$/.test(part))) return null;
+	if (parts.length !== 4 || !parts.every((part) => /^\\d{1,3}$/.test(part))) return null;
 	const octets = parts.map(Number);
 	return octets.every((part) => part >= 0 && part <= 255) ? octets : null;
 }
@@ -148,12 +150,10 @@ function parseIPv6(value) {
 	const right = halves.length === 2 && halves[1] ? halves[1].split(":") : [];
 	const groups = [...left, ...right];
 	if (groups.some((group) => !/^[0-9a-f]{1,4}$/i.test(group))) return null;
-
 	if (halves.length === 1) {
 		if (groups.length !== 8) return null;
 		return groups.map((group) => Number.parseInt(group, 16));
 	}
-
 	const missing = 8 - groups.length;
 	if (missing < 1) return null;
 	return [
