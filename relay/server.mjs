@@ -27,6 +27,8 @@ for (const [subnet, prefix] of [
 ]) blocked.addSubnet(subnet, prefix, "ipv6");
 
 function isPublicIp(address) {
+	const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(address);
+	if (mapped) return isPublicIp(mapped[1]);
 	const family = net.isIP(address);
 	return family !== 0 && !blocked.check(address, family === 4 ? "ipv4" : "ipv6");
 }
@@ -103,6 +105,9 @@ async function handleClient(socket) {
 		idleTimer = setTimeout(close, IDLE_TIMEOUT_MS);
 		idleTimer.unref?.();
 	};
+	socket.on("drain", () => { backpressured = false; });
+	socket.on("error", () => close());
+	socket.on("close", () => close());
 	try {
 		if (SECRET.length < 32) throw new Error("UDP_RELAY_SECRET must contain at least 32 characters");
 		const reader = new Reader(socket);
@@ -116,7 +121,7 @@ async function handleClient(socket) {
 		const type = (await reader.exact(1))[0];
 		const portBytes = await reader.exact(2);
 		const port = portBytes.readUInt16BE(0);
-		if (!port) throw new Error("Invalid destination port");
+		if (!port || port === 25) throw new Error("Invalid destination port");
 		const addressLength = type === 1 ? 4 : type === 3 ? 16 : type === 2 ? (await reader.exact(1))[0] : 0;
 		if (!addressLength || addressLength > 253) throw new Error("Invalid destination address length");
 		const host = parseDestination(type, await reader.exact(addressLength));
@@ -168,9 +173,6 @@ async function handleClient(socket) {
 		if (!closed) console.warn("UDP relay session closed:", error.message);
 		close();
 	}
-	socket.on("drain", () => { backpressured = false; });
-	socket.on("error", () => close());
-	socket.on("close", () => close());
 }
 
 if (SECRET.length < 32) {
