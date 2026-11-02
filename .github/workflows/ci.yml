@@ -28,5 +28,11 @@ jobs:
       - name: Run tests
         run: npm test
 
+      - name: Validate UDP relay syntax
+        run: node --check relay/server.mjs
+
+      - name: Build UDP relay container
+        run: docker build -t vless-udp-relay ./relay
+
       - name: Validate Worker bundle
         run: npx wrangler deploy --dry-run

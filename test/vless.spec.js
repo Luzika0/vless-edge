@@ -50,8 +50,10 @@ describe("VLESS protocol parser", () => {
 		expect(parseVlessRequest(makeRequest(), "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")).toBeNull();
 	});
 
-	it("rejects unsupported UDP command", () => {
-		expect(parseVlessRequest(makeRequest({ command: 2 }), UUID)).toBeNull();
+	it("parses a valid UDP domain request", () => {
+		const parsed = parseVlessRequest(makeRequest({ command: 2, port: 53 }), UUID);
+		expect(parsed).toMatchObject({ command: 2, host: "example.com", port: 53, addressType: 2 });
+		expect(parsed.addressBytes).toEqual(new TextEncoder().encode("example.com"));
 	});
 
 	it("waits for fragmented headers", () => {
