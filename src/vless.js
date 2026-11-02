@@ -18,7 +18,9 @@ export function parseVlessRequest(input, expectedUuid) {
 	const expected = uuidToBytes(expectedUuid);
 
 	// version(1) + UUID(16) + addons length(1) + command(1) + port(2) + address type(1)
-	if (!expected || data.byteLength < 22 || data[0] !== 0) return null;
+	if (!expected) return null;
+	if (data.byteLength < 18) return { incomplete: true };
+	if (data[0] !== 0) return null;
 
 	let mismatch = 0;
 	for (let i = 0; i < 16; i += 1) {
@@ -29,7 +31,7 @@ export function parseVlessRequest(input, expectedUuid) {
 	const addonsLength = data[17];
 	if (addonsLength > 64) return null;
 	const commandIndex = 18 + addonsLength;
-	if (commandIndex + 4 > data.byteLength) return null;
+	if (commandIndex + 4 > data.byteLength) return { incomplete: true };
 
 	// VLESS command 0x01 is TCP. UDP and MUX are deliberately not implemented.
 	if (data[commandIndex] !== 0x01) return null;
@@ -40,20 +42,21 @@ export function parseVlessRequest(input, expectedUuid) {
 	let host;
 
 	if (addressType === 0x01) {
-		if (offset + 4 > data.byteLength) return null;
+		if (offset + 4 > data.byteLength) return { incomplete: true };
 		const octets = Array.from(data.subarray(offset, offset + 4));
 		host = octets.join(".");
 		offset += 4;
 	} else if (addressType === 0x02) {
-		if (offset >= data.byteLength) return null;
+		if (offset >= data.byteLength) return { incomplete: true };
 		const length = data[offset++];
-		if (length < 1 || offset + length > data.byteLength) return null;
+		if (length < 1) return null;
+		if (offset + length > data.byteLength) return { incomplete: true };
 		host = new TextDecoder("utf-8", { fatal: true }).decode(data.subarray(offset, offset + length));
 		offset += length;
 		if (!DOMAIN_PATTERN.test(host)) return null;
 		host = host.toLowerCase();
 	} else if (addressType === 0x03) {
-		if (offset + 16 > data.byteLength) return null;
+		if (offset + 16 > data.byteLength) return { incomplete: true };
 		const words = [];
 		for (let i = 0; i < 16; i += 2) {
 			words.push(((data[offset + i] << 8) | data[offset + i + 1]).toString(16));
