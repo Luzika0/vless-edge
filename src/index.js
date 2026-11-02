@@ -1,7 +1,6 @@
 import { connect } from "cloudflare:sockets";
-import { isBlockedHost, parseVlessRequest } from "./vless.js";
+import { parseVlessRequest } from "./vless.js";
 
-const textEncoder = new TextEncoder();
 const MAX_PENDING_HEADER_BYTES = 8 * 1024;
 
 function json(message, status = 400) {
